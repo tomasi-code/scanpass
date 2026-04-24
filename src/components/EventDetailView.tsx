@@ -268,11 +268,9 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
       {showBulkModal && (
         <BulkGenerateModal 
            event={event}
+           data={data}
            onClose={() => setShowBulkModal(false)}
-           onSave={(newTickets) => {
-             onUpdateData({ ...data, tickets: [...data.tickets, ...newTickets] });
-             setShowBulkModal(false);
-           }}
+           onUpdateData={onUpdateData}
         />
       )}
 
@@ -361,18 +359,23 @@ function AddTicketModal({ event, onClose, onSave }: { event: Event, onClose: () 
   );
 }
 
-function BulkGenerateModal({ event, onClose, onSave }: { event: Event, onClose: () => void, onSave: (t: Ticket[]) => void }) {
+function BulkGenerateModal({ event, data, onClose, onUpdateData }: { event: Event, data: AppData, onClose: () => void, onUpdateData: (newData: AppData) => Promise<void> }) {
   const [count, setCount] = useState(10);
   const [ticketType, setTicketType] = useState<TicketType>('General');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newTickets: Ticket[] = [];
+    setIsGenerating(true);
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
     
+    let currentTickets = [...data.tickets];
+
     for (let i = 0; i < count; i++) {
+      setCurrentIndex(i + 1);
       const num = Math.floor(100000 + Math.random() * 899999);
-      newTickets.push({
+      const newTicket: Ticket = {
         id: `${event.id.split('-')[1]}-${dateStr}-${num}`,
         eventId: event.id,
         eventName: event.name,
@@ -382,9 +385,15 @@ function BulkGenerateModal({ event, onClose, onSave }: { event: Event, onClose: 
         issuedAt: Date.now(),
         status: 'Active',
         scanCount: 0
-      });
+      };
+      
+      currentTickets = [...currentTickets, newTicket];
+      // Sequentially save each ticket to Supabase via onUpdateData
+      await onUpdateData({ ...data, tickets: currentTickets });
     }
-    onSave(newTickets);
+    
+    setIsGenerating(false);
+    onClose();
   };
 
   return (
@@ -400,30 +409,47 @@ function BulkGenerateModal({ event, onClose, onSave }: { event: Event, onClose: 
             <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Generate blank tickets for physical printing</p>
           </div>
           <div className="p-6 space-y-4">
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Number of Tickets</label>
-              <input 
-                required 
-                type="number" 
-                max={500}
-                min={1}
-                className="input-field" 
-                value={count} 
-                onChange={e => setCount(parseInt(e.target.value))} 
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ticket Type</label>
-              <select className="input-field" value={ticketType} onChange={e => setTicketType(e.target.value as TicketType)}>
-                <option value="General">General Admission</option>
-                <option value="VIP">VIP Guest</option>
-                <option value="Staff">Event Staff</option>
-              </select>
-            </div>
+            {isGenerating ? (
+              <div className="py-10 text-center space-y-4">
+                <div className="w-16 h-16 border-4 border-slate-100 border-t-indigo-600 rounded-full animate-spin mx-auto"></div>
+                <p className="text-lg font-black uppercase tracking-tighter italic">Generating ticket {currentIndex} of {count}...</p>
+                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-indigo-600 h-full transition-all duration-300" 
+                    style={{ width: `${(currentIndex / count) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Number of Tickets</label>
+                  <input 
+                    required 
+                    type="number" 
+                    max={500}
+                    min={1}
+                    className="input-field" 
+                    value={count} 
+                    onChange={e => setCount(parseInt(e.target.value))} 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ticket Type</label>
+                  <select className="input-field" value={ticketType} onChange={e => setTicketType(e.target.value as TicketType)}>
+                    <option value="General">General Admission</option>
+                    <option value="VIP">VIP Guest</option>
+                    <option value="Staff">Event Staff</option>
+                  </select>
+                </div>
+              </>
+            )}
           </div>
           <div className="p-6 bg-slate-50 flex justify-end gap-3">
-            <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
-            <button type="submit" className="btn-primary px-8">Generate {count} Codes</button>
+            <button type="button" disabled={isGenerating} onClick={onClose} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={isGenerating} className="btn-primary px-8">
+              {isGenerating ? 'Processing...' : `Generate ${count} Codes`}
+            </button>
           </div>
         </form>
       </motion.div>

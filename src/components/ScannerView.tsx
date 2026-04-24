@@ -28,17 +28,46 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
   const startScanner = async () => {
     try {
       setError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      
+      // Advanced constraints for mobile rear camera as requested
+      const constraints = {
+        video: { 
+          facingMode: { exact: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      };
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (e) {
+        console.warn("Exact environment camera failed, falling back to general environment", e);
+        stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment' } 
+        });
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Explicit attributes for iOS Safari
         videoRef.current.setAttribute("playsinline", "true"); 
-        videoRef.current.play();
+        videoRef.current.setAttribute("autoplay", "true");
+        videoRef.current.setAttribute("muted", "true");
+        
+        // Ensure playback starts
+        await videoRef.current.play();
+        
         setIsScanning(true);
         requestAnimationFrame(tick);
       }
-    } catch (err) {
-      console.error(err);
-      setError("Unable to access camera. Please check permissions.");
+    } catch (err: any) {
+      console.error("Camera Access Error:", err);
+      let msg = "Unable to access camera.";
+      if (err.name === 'NotAllowedError') msg = "Camera permission denied. Please enable in settings.";
+      else if (err.name === 'NotFoundError') msg = "No camera hardware detected.";
+      else msg = `Camera Error: ${err.message || 'Unknown protocol violation'}`;
+      setError(msg);
     }
   };
 
@@ -178,6 +207,14 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
               <h2 className="text-3xl font-black uppercase tracking-tighter italic">Scanner Online</h2>
               <p className="text-slate-500 mt-2 font-medium">Ready to parse scannable access codes.</p>
             </div>
+            
+            {error && (
+              <div className="p-4 bg-rose-50 border-2 border-rose-500 rounded flex items-center gap-3 text-rose-600 max-w-sm">
+                <AlertCircle size={20} />
+                <p className="text-[10px] font-black uppercase tracking-widest text-left">{error}</p>
+              </div>
+            )}
+
             <button onClick={startScanner} className="btn-primary px-16 py-5 text-xl">
               Launch Interface
             </button>

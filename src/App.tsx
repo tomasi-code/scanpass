@@ -85,44 +85,49 @@ export default function App() {
         await dataService.clearAll();
       } else {
         // Events
-        if (newData.events.length > oldData.events.length) {
-          const added = newData.events.find(e => !oldData.events.some(oe => oe.id === e.id));
-          if (added) await dataService.updateEvent(added);
-        } else if (newData.events.length < oldData.events.length) {
-          const removed = oldData.events.find(e => !newData.events.some(ne => ne.id === e.id));
-          if (removed) await dataService.deleteEvent(removed.id);
-        } else {
-          // Check for updates
-          for (const e of newData.events) {
-            const oe = oldData.events.find(prev => prev.id === e.id);
-            if (oe && JSON.stringify(oe) !== JSON.stringify(e)) {
-              await dataService.updateEvent(e);
-            }
+        const newEvents = newData.events.filter(ne => !oldData.events.some(oe => oe.id === ne.id));
+        for (const e of newEvents) {
+          await dataService.updateEvent(e);
+        }
+
+        const removedEvents = oldData.events.filter(oe => !newData.events.some(ne => ne.id === oe.id));
+        for (const e of removedEvents) {
+          await dataService.deleteEvent(e.id);
+        }
+
+        // Check for updates
+        for (const e of newData.events) {
+          const oe = oldData.events.find(prev => prev.id === e.id);
+          if (oe && JSON.stringify(oe) !== JSON.stringify(e)) {
+            await dataService.updateEvent(e);
           }
         }
       }
 
-      // Tickets
-      if (newData.tickets.length > oldData.tickets.length) {
-        const added = newData.tickets.find(t => !oldData.tickets.some(ot => ot.id === t.id));
-        if (added) await dataService.updateTicket(added);
-      } else if (newData.tickets.length < oldData.tickets.length) {
-        const removed = oldData.tickets.find(t => !newData.tickets.some(nt => nt.id === t.id));
-        if (removed) await dataService.deleteTicket(removed.id);
-      } else {
-        // Check for updates
-        for (const t of newData.tickets) {
-          const ot = oldData.tickets.find(prev => prev.id === t.id);
-          if (ot && JSON.stringify(ot) !== JSON.stringify(t)) {
-            await dataService.updateTicket(t);
-          }
+      // Tickets - Batch handling fix for Bug 1
+      const addedTickets = newData.tickets.filter(nt => !oldData.tickets.some(ot => ot.id === nt.id));
+      for (const t of addedTickets) {
+        // Sequential insertion as requested
+        await dataService.updateTicket(t);
+      }
+
+      const removedTickets = oldData.tickets.filter(ot => !newData.tickets.some(nt => nt.id === ot.id));
+      for (const t of removedTickets) {
+        await dataService.deleteTicket(t.id);
+      }
+
+      // Check for updates
+      for (const t of newData.tickets) {
+        const ot = oldData.tickets.find(prev => prev.id === t.id);
+        if (ot && JSON.stringify(ot) !== JSON.stringify(t)) {
+          await dataService.updateTicket(t);
         }
       }
 
       // Scan Logs
-      if (newData.scanLogs.length > oldData.scanLogs.length) {
-        const added = newData.scanLogs.find(l => !oldData.scanLogs.some(ol => ol.id === l.id));
-        if (added) await dataService.addScanLog(added);
+      const newLogs = newData.scanLogs.filter(nl => !oldData.scanLogs.some(ol => ol.id === nl.id));
+      for (const l of newLogs) {
+        await dataService.addScanLog(l);
       }
 
       // Settings
