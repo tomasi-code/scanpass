@@ -1,0 +1,8 @@
+{
+  "name": "ScanPass - Event Ticket Manager",
+  "description": "A comprehensive event management and ticket scanning application with QR code generation and live camera scanning.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
