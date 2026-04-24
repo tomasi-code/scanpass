@@ -10,13 +10,14 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface ScannerViewProps {
   data: AppData;
-  onUpdateData: (newData: AppData) => void;
+  onUpdateData: (newData: AppData) => Promise<void>;
 }
 
 export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState<string>('Ready');
   const [scanResult, setScanResult] = useState<{
     status: 'granted' | 'duplicate' | 'invalid';
     ticket?: Ticket;
@@ -24,41 +25,58 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualId, setManualId] = useState('');
+  const [libLoaded, setLibLoaded] = useState(false);
+
+  // Load jsQR library dynamically
+  useEffect(() => {
+    if (window.hasOwnProperty('jsQR')) {
+      setLibLoaded(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+    script.async = true;
+    script.onload = () => setLibLoaded(true);
+    document.body.appendChild(script);
+    return () => {
+      // We don't remove the script to avoid reloading if component remounts
+    };
+  }, []);
 
   const startScanner = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError("Camera not supported on this browser. Please use Chrome or Safari.");
+      setCameraStatus("Hardware Error");
+      return;
+    }
+
     try {
       setError(null);
+      setCameraStatus("Waiting for camera...");
       
-      // Advanced constraints for mobile rear camera as requested
-      const constraints = {
-        video: { 
-          facingMode: { exact: 'environment' },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      };
-
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (e) {
-        console.warn("Exact environment camera failed, falling back to general environment", e);
+        // Try exact environment camera first (rear)
         stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment' } 
+          video: { facingMode: { exact: 'environment' } } 
         });
+      } catch (e) {
+        console.warn("Exact environment camera failed, falling back to any video source", e);
+        // Fallback as requested
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Explicit attributes for iOS Safari
-        videoRef.current.setAttribute("playsinline", "true"); 
-        videoRef.current.setAttribute("autoplay", "true");
-        videoRef.current.setAttribute("muted", "true");
+        // Exact attributes as requested
+        videoRef.current.setAttribute("playsInline", "true"); 
+        videoRef.current.muted = true;
+        videoRef.current.autoplay = true;
         
-        // Ensure playback starts
         await videoRef.current.play();
         
         setIsScanning(true);
+        setCameraStatus("Camera active");
         requestAnimationFrame(tick);
       }
     } catch (err: any) {
@@ -68,6 +86,7 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
       else if (err.name === 'NotFoundError') msg = "No camera hardware detected.";
       else msg = `Camera Error: ${err.message || 'Unknown protocol violation'}`;
       setError(msg);
+      setCameraStatus("Error");
     }
   };
 
@@ -76,17 +95,21 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach(track => track.stop());
       setIsScanning(false);
+      setCameraStatus("Ready");
     }
   };
 
   const tick = () => {
-    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA && canvasRef.current) {
-      const canvas = canvasRef.current.getContext("2d");
+    if (!isScanning) return;
+
+    if (videoRef.current?.readyState === videoRef.current?.HAVE_ENOUGH_DATA && canvasRef.current && libLoaded) {
+      const canvas = canvasRef.current.getContext("2d", { willReadFrequently: true });
       if (canvas) {
         canvasRef.current.height = videoRef.current.videoHeight;
         canvasRef.current.width = videoRef.current.videoWidth;
         canvas.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
         const imageData = canvas.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+        
         // @ts-ignore
         const code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, {
           inversionAttempts: "dontInvert",
@@ -98,9 +121,7 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
         }
       }
     }
-    if (isScanning) {
-      requestAnimationFrame(tick);
-    }
+    requestAnimationFrame(tick);
   };
 
   const handleScan = (qrData: string) => {
@@ -187,9 +208,6 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
           <h1 className="text-5xl font-black uppercase tracking-tighter italic leading-none">Validator</h1>
           <p className="text-slate-500 mt-2 text-lg font-medium tracking-wide">Secure door entry and ticket authentication.</p>
         </div>
-        <div className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded border-2 border-slate-900 border-none font-black text-xs uppercase tracking-widest text-slate-400">
-           Camera Ready
-        </div>
       </div>
 
       <AnimatePresence mode="wait">
@@ -208,16 +226,15 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
               <p className="text-slate-500 mt-2 font-medium">Ready to parse scannable access codes.</p>
             </div>
             
-            {error && (
-              <div className="p-4 bg-rose-50 border-2 border-rose-500 rounded flex items-center gap-3 text-rose-600 max-w-sm">
-                <AlertCircle size={20} />
-                <p className="text-[10px] font-black uppercase tracking-widest text-left">{error}</p>
-              </div>
-            )}
-
             <button onClick={startScanner} className="btn-primary px-16 py-5 text-xl">
               Launch Interface
             </button>
+            <p className={`text-[10px] font-black uppercase tracking-[0.2em] ${
+              cameraStatus === 'Camera active' ? 'text-emerald-500' : 
+              cameraStatus === 'Error' || cameraStatus === 'Hardware Error' ? 'text-rose-500' : 'text-slate-400'
+            }`}>
+              {error || cameraStatus}
+            </p>
             <div className="pt-10 border-t border-slate-100 w-full max-w-sm">
                <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-6">Standard Override</p>
                <div className="flex gap-3">
@@ -243,7 +260,13 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
             animate={{ opacity: 1 }}
             className="relative bg-black rounded-3xl overflow-hidden aspect-[4/5] shadow-2xl border-[12px] border-slate-900"
           >
-            <video ref={videoRef} className="w-full h-full object-cover grayscale opacity-80" />
+            <video 
+              ref={videoRef} 
+              className="w-full h-full object-cover grayscale opacity-80" 
+              playsInline 
+              muted 
+              autoPlay 
+            />
             <canvas ref={canvasRef} className="hidden" />
             
             {/* Scanning Overlay */}
@@ -276,33 +299,33 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
             initial={{ opacity: 0, y: 30, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             className={`card overflow-hidden shadow-2xl border-[6px] ${
-              scanResult.status === 'granted' ? 'border-emerald-500' : 
-              scanResult.status === 'duplicate' ? 'border-amber-500' : 
+              scanResult?.status === 'granted' ? 'border-emerald-500' : 
+              scanResult?.status === 'duplicate' ? 'border-amber-500' : 
               'border-rose-500'
             }`}
           >
             <div className={`p-12 text-center text-white ${
-              scanResult.status === 'granted' ? 'bg-emerald-600' : 
-              scanResult.status === 'duplicate' ? 'bg-amber-600' : 
+              scanResult?.status === 'granted' ? 'bg-emerald-600' : 
+              scanResult?.status === 'duplicate' ? 'bg-amber-600' : 
               'bg-rose-600'
             }`}>
               <div className="flex justify-center mb-6">
                 <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-md">
-                   {scanResult.status === 'granted' ? <CheckCircle2 size={64} /> : 
-                    scanResult.status === 'duplicate' ? <AlertCircle size={64} /> : 
+                   {scanResult?.status === 'granted' ? <CheckCircle2 size={64} /> : 
+                    scanResult?.status === 'duplicate' ? <AlertCircle size={64} /> : 
                     <XCircle size={64} />}
                 </div>
               </div>
               <h2 className="text-5xl font-black uppercase tracking-tighter italic leading-none">
-                {scanResult.status === 'granted' ? 'Access Granted' : 
-                 scanResult.status === 'duplicate' ? 'Already Scanned' : 
+                {scanResult?.status === 'granted' ? 'Access Granted' : 
+                 scanResult?.status === 'duplicate' ? 'Already Scanned' : 
                  'Access Denied'}
               </h2>
-              {scanResult.message && <p className="mt-4 text-white font-black uppercase tracking-widest text-xs opacity-75">{scanResult.message}</p>}
+              {scanResult?.message && <p className="mt-4 text-white font-black uppercase tracking-widest text-xs opacity-75">{scanResult.message}</p>}
             </div>
 
             <div className="p-12 space-y-10 bg-white">
-              {scanResult.ticket ? (
+              {scanResult?.ticket ? (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                     <div className="space-y-6">
@@ -340,7 +363,7 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
                 <div className="py-12 text-center text-slate-400 border-2 border-dashed border-slate-100 rounded">
                    <AlertCircle size={40} className="mx-auto mb-4 opacity-50" />
                    <h3 className="text-xl font-black uppercase tracking-tight italic">Missing Identifier</h3>
-                   <p className="text-xs font-bold uppercase tracking-widest mt-2">{scanResult.message || 'The scanned data is not reactive.'}</p>
+                   <p className="text-xs font-bold uppercase tracking-widest mt-2">{scanResult?.message || 'The scanned data is not reactive.'}</p>
                 </div>
               )}
 
