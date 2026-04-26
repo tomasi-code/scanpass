@@ -603,7 +603,7 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
                 left: `${event.qrPosition.x}%`, 
                 top: `${event.qrPosition.y}%`, 
                 width: `${event.qrPosition.width}%`, 
-                height: `${event.qrPosition.width}%`
+                aspectRatio: '1 / 1'
               }}
             >
               <div 
@@ -725,13 +725,17 @@ function TicketDesigner({ event, onUpdate }: { event: Event, onUpdate: (artwork:
 
       if (isResizing) {
         const dw = ((e.clientX - resizeStart.current.startX) / rect.width) * 100;
-        const dh = ((e.clientY - resizeStart.current.startY) / rect.height) * 100;
         
-        setQrPos(prev => ({
-          ...prev,
-          width: Math.max(5, Math.min(100 - prev.x, resizeStart.current.initialWidth + dw)),
-          height: Math.max(5, Math.min(100 - prev.y, resizeStart.current.initialHeight + dh))
-        }));
+        setQrPos(prev => {
+          const ratio = rect.height / rect.width;
+          const maxW = Math.min(100 - prev.x, (100 - prev.y) * ratio);
+          const newSize = Math.max(5, Math.min(maxW, resizeStart.current.initialWidth + dw));
+          return {
+            ...prev,
+            width: newSize,
+            height: newSize
+          };
+        });
       }
     };
 
@@ -826,7 +830,7 @@ function TicketDesigner({ event, onUpdate }: { event: Event, onUpdate: (artwork:
                   left: `${qrPos.x}%`, 
                   top: `${qrPos.y}%`, 
                   width: `${qrPos.width}%`, 
-                  height: `${qrPos.width}%`,
+                  aspectRatio: '1 / 1',
                   cursor: isDragging ? 'grabbing' : 'grab'
                 }}
               >
@@ -854,7 +858,7 @@ function TicketDesigner({ event, onUpdate }: { event: Event, onUpdate: (artwork:
                   left: `${qrPos.x}%`, 
                   top: `${qrPos.y}%`, 
                   width: `${qrPos.width}%`, 
-                  height: `${qrPos.width}%`
+                  aspectRatio: '1 / 1'
                 }}
               >
                 <div className="w-full h-full bg-slate-100 flex items-center justify-center">
