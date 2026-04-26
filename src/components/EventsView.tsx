@@ -11,7 +11,7 @@ import { motion } from 'motion/react';
 interface EventsViewProps {
   data: AppData;
   onNavigateToEvent: (id: string) => void;
-  onUpdateData: (newData: AppData) => void;
+  onUpdateData: (newData: AppData) => Promise<void>;
 }
 
 export default function EventsView({ data, onNavigateToEvent, onUpdateData }: EventsViewProps) {

@@ -21,7 +21,11 @@ import {
   FileSpreadsheet,
   QrCode,
   Trash2,
-  Layers
+  Layers,
+  ImagePlus,
+  Move,
+  Check,
+  Maximize2
 } from 'lucide-react';
 import { AppData, Ticket, Event, TicketType, TicketStatus } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -29,7 +33,7 @@ import { motion, AnimatePresence } from 'motion/react';
 interface EventDetailViewProps {
   eventId: string;
   data: AppData;
-  onUpdateData: (newData: AppData) => void;
+  onUpdateData: (newData: AppData) => Promise<void>;
 }
 
 export default function EventDetailView({ eventId, data, onUpdateData }: EventDetailViewProps) {
@@ -40,6 +44,7 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
   const [showTicketCard, setShowTicketCard] = useState<Ticket | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | TicketStatus>('all');
+  const [showDesigner, setShowDesigner] = useState(false);
 
   if (!event) return <div>Event not found</div>;
 
@@ -120,6 +125,41 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
           <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Capacity</p>
           <p className="text-4xl font-black mt-1 text-slate-900">{tickets.length} / {event.maxCapacity}</p>
         </div>
+      </div>
+
+      {/* Ticket Designer Section */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-3">
+            <Layers size={24} className="text-indigo-600" />
+            Ticket Designer
+          </h2>
+          <button 
+            onClick={() => setShowDesigner(!showDesigner)} 
+            className="btn-secondary"
+          >
+            {showDesigner ? 'Close Designer' : 'Open Designer'}
+          </button>
+        </div>
+
+        <AnimatePresence>
+          {showDesigner && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              <TicketDesigner 
+                event={event} 
+                onUpdate={(artwork, qrPosition) => {
+                  const newEvents = data.events.map(e => e.id === event.id ? { ...e, artwork, qrPosition } : e);
+                  onUpdateData({ ...data, events: newEvents });
+                }}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Tickets List Area */}
@@ -370,6 +410,7 @@ function BulkGenerateModal({ event, data, onClose, onUpdateData }: { event: Even
     setIsGenerating(true);
     const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '');
     
+    let currentAppData = { ...data };
     let currentTickets = [...data.tickets];
 
     for (let i = 0; i < count; i++) {
@@ -388,8 +429,9 @@ function BulkGenerateModal({ event, data, onClose, onUpdateData }: { event: Even
       };
       
       currentTickets = [...currentTickets, newTicket];
+      currentAppData = { ...currentAppData, tickets: currentTickets };
       // Sequentially save each ticket to Supabase via onUpdateData
-      await onUpdateData({ ...data, tickets: currentTickets });
+      await onUpdateData(currentAppData);
     }
     
     setIsGenerating(false);
@@ -459,6 +501,7 @@ function BulkGenerateModal({ event, data, onClose, onUpdateData }: { event: Even
 
 function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Event, onClose: () => void }) {
   const qrRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   
   useEffect(() => {
     if (qrRef.current) {
@@ -482,9 +525,60 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
     }
   }, [ticket]);
 
+  const handleDownload = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Load artwork
+    const artworkImg = new Image();
+    artworkImg.crossOrigin = "anonymous";
+    artworkImg.src = event.artwork || '';
+    
+    await new Promise((resolve) => {
+      artworkImg.onload = resolve;
+    });
+
+    canvas.width = artworkImg.width;
+    canvas.height = artworkImg.height;
+
+    // Draw artwork
+    ctx.drawImage(artworkImg, 0, 0);
+
+    if (event.qrPosition) {
+      // Get QR code as image from the qrRef hidden element
+      const qrCanvas = qrRef.current?.querySelector('canvas');
+      if (qrCanvas) {
+        const x = (event.qrPosition.x / 100) * canvas.width;
+        const y = (event.qrPosition.y / 100) * canvas.height;
+        const size = (event.qrPosition.width / 100) * canvas.width;
+
+        // Draw white background for QR
+        ctx.fillStyle = 'white';
+        ctx.fillRect(x - 5, y - 5, size + 10, size + 10);
+        
+        ctx.drawImage(qrCanvas, x, y, size, size);
+      }
+    }
+
+    const link = document.createElement('a');
+    link.download = `${ticket.attendeeName.replace(/\s+/g, '_')}_Ticket.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <canvas ref={canvasRef} className="hidden" />
       <div className="absolute top-4 right-4 flex gap-4">
+        {event.artwork && event.qrPosition && (
+          <button onClick={handleDownload} className="btn-secondary bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-700">
+            <Download size={20} />
+            Download PNG
+          </button>
+        )}
         <button onClick={() => window.print()} className="btn-secondary bg-white/10 text-white border-white/20 hover:bg-white/20">
           <Printer size={20} />
           Print
@@ -500,42 +594,299 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
         id="printable-ticket"
         className="ticket-card bg-white p-0 overflow-hidden w-full max-w-sm border-2 border-slate-900 shadow-2xl"
       >
-        <div className="bg-[#0f172a] p-6 flex justify-between items-center text-white">
-          <span className="font-black tracking-tighter text-xl uppercase italic">SCANPASS</span>
-          <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Official Ticket</span>
-        </div>
-        
-        <div className="p-8 space-y-6">
-          <div>
-            <h1 className="text-2xl font-black text-slate-900 leading-tight mb-1 uppercase tracking-tighter italic">{event.name}</h1>
-            <p className="text-slate-500 text-xs font-black uppercase tracking-widest">{new Date(event.date).toLocaleDateString()} • {event.time}</p>
-            <p className="text-slate-400 text-[10px] mt-1 font-bold uppercase tracking-widest">{event.venue}</p>
+        {event.artwork && event.qrPosition ? (
+          <div className="relative">
+            <img src={event.artwork} alt="Ticket Artwork" className="w-full h-auto" />
+            <div 
+              className="absolute bg-white p-1"
+              style={{ 
+                left: `${event.qrPosition.x}%`, 
+                top: `${event.qrPosition.y}%`, 
+                width: `${event.qrPosition.width}%`, 
+                height: `${event.qrPosition.width}%`
+              }}
+            >
+              <div 
+                ref={qrRef} 
+                className="w-full h-full [&>canvas]:w-full [&>canvas]:h-full [&>img]:hidden"
+              ></div>
+            </div>
+            <div className="p-4 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest text-center">
+              Event Ticket: {ticket.attendeeName} • {ticket.id}
+            </div>
           </div>
+        ) : (
+          <>
+            <div className="bg-[#0f172a] p-6 flex justify-between items-center text-white">
+              <span className="font-black tracking-tighter text-xl uppercase italic">SCANPASS</span>
+              <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Official Ticket</span>
+            </div>
+            
+            <div className="p-8 space-y-6">
+              <div>
+                <h1 className="text-2xl font-black text-slate-900 leading-tight mb-1 uppercase tracking-tighter italic">{event.name}</h1>
+                <p className="text-slate-500 text-xs font-black uppercase tracking-widest">{new Date(event.date).toLocaleDateString()} • {event.time}</p>
+                <p className="text-slate-400 text-[10px] mt-1 font-bold uppercase tracking-widest">{event.venue}</p>
+              </div>
 
-          <div className="h-0.5 bg-dashed bg-slate-100"></div>
+              <div className="h-0.5 bg-dashed bg-slate-100"></div>
 
-          <div>
-             <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Attendee</p>
-             <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">{ticket.attendeeName}</h2>
-             <span className={`inline-flex items-center px-3 py-1 mt-3 rounded text-[10px] font-black uppercase tracking-widest ${
-               ticket.ticketType === 'VIP' ? 'bg-amber-100 text-amber-700' :
-               ticket.ticketType === 'Staff' ? 'bg-slate-100 text-slate-700' :
-               'bg-indigo-600 text-white shadow-[0_2px_0_rgb(67,56,202)]'
-             }`}>
-               {ticket.ticketType} Pass
-             </span>
-          </div>
+              <div>
+                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Attendee</p>
+                 <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">{ticket.attendeeName}</h2>
+                 <span className={`inline-flex items-center px-3 py-1 mt-3 rounded text-[10px] font-black uppercase tracking-widest ${
+                   ticket.ticketType === 'VIP' ? 'bg-amber-100 text-amber-700' :
+                   ticket.ticketType === 'Staff' ? 'bg-slate-100 text-slate-700' :
+                   'bg-indigo-600 text-white shadow-[0_2px_0_rgb(67,56,202)]'
+                 }`}>
+                   {ticket.ticketType} Pass
+                 </span>
+              </div>
 
-          <div className="flex flex-col items-center justify-center pt-4">
-             <div ref={qrRef} className="p-2 border-4 border-slate-50 rounded"></div>
-             <p className="mt-4 font-mono text-[10px] text-slate-400 tracking-widest font-black uppercase">{ticket.id}</p>
-          </div>
-        </div>
-        
-        <div className="bg-slate-50 p-4 border-t border-dashed border-slate-200 text-center">
-            <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Present this QR code for secure validation.</p>
-        </div>
+              <div className="flex flex-col items-center justify-center pt-4">
+                 <div ref={qrRef} className="p-2 border-4 border-slate-50 rounded"></div>
+                 <p className="mt-4 font-mono text-[10px] text-slate-400 tracking-widest font-black uppercase">{ticket.id}</p>
+              </div>
+            </div>
+            
+            <div className="bg-slate-50 p-4 border-t border-dashed border-slate-200 text-center">
+                <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest">Present this QR code for secure validation.</p>
+            </div>
+          </>
+        )}
       </motion.div>
+    </div>
+  );
+}
+
+function TicketDesigner({ event, onUpdate }: { event: Event, onUpdate: (artwork: string, qrPosition: any) => void }) {
+  const [step, setStep] = useState(event.artwork ? 2 : 1);
+  const [artwork, setArtwork] = useState<string | null>(event.artwork || null);
+  const [qrPos, setQrPos] = useState(event.qrPosition || { x: 10, y: 10, width: 20, height: 20 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, initialX: 0, initialY: 0 });
+  const resizeStart = useRef({ initialWidth: 0, initialHeight: 0, startX: 0, startY: 0 });
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        setArtwork(base64);
+        setStep(2);
+        onUpdate(base64, qrPos);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!containerRef.current) return;
+    dragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      initialX: qrPos.x,
+      initialY: qrPos.y
+    };
+    setIsDragging(true);
+  };
+
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    resizeStart.current = {
+      initialWidth: qrPos.width,
+      initialHeight: qrPos.height,
+      startX: e.clientX,
+      startY: e.clientY
+    };
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+
+      if (isDragging) {
+        const dx = ((e.clientX - dragStart.current.x) / rect.width) * 100;
+        const dy = ((e.clientY - dragStart.current.y) / rect.height) * 100;
+        
+        setQrPos(prev => ({
+          ...prev,
+          x: Math.max(0, Math.min(100 - prev.width, dragStart.current.initialX + dx)),
+          y: Math.max(0, Math.min(100 - prev.height, dragStart.current.initialY + dy))
+        }));
+      }
+
+      if (isResizing) {
+        const dw = ((e.clientX - resizeStart.current.startX) / rect.width) * 100;
+        const dh = ((e.clientY - resizeStart.current.startY) / rect.height) * 100;
+        
+        setQrPos(prev => ({
+          ...prev,
+          width: Math.max(5, Math.min(100 - prev.x, resizeStart.current.initialWidth + dw)),
+          height: Math.max(5, Math.min(100 - prev.y, resizeStart.current.initialHeight + dh))
+        }));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      setIsResizing(false);
+    };
+
+    if (isDragging || isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, isResizing]);
+
+  const saveConfig = () => {
+    if (artwork) {
+      onUpdate(artwork, qrPos);
+      setStep(3);
+    }
+  };
+
+  return (
+    <div className="card overflow-hidden border-2 border-slate-900 mt-6">
+      <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <div className="flex gap-4">
+          <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${step >= 1 ? 'text-indigo-600' : 'text-slate-400'}`}>
+            <span className="w-5 h-5 rounded-full bg-current text-white flex items-center justify-center text-[8px]">1</span>
+            Artwork
+          </div>
+          <div className="w-8 h-px bg-slate-200 self-center"></div>
+          <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${step >= 2 ? 'text-indigo-600' : 'text-slate-400'}`}>
+            <span className="w-5 h-5 rounded-full bg-current text-white flex items-center justify-center text-[8px]">2</span>
+            Position
+          </div>
+          <div className="w-8 h-px bg-slate-200 self-center"></div>
+          <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${step >= 3 ? 'text-indigo-600' : 'text-slate-400'}`}>
+            <span className="w-5 h-5 rounded-full bg-current text-white flex items-center justify-center text-[8px]">3</span>
+            Preview
+          </div>
+        </div>
+        {step === 2 && artwork && (
+          <button onClick={saveConfig} className="btn-primary text-[10px] py-1.5 px-3">
+            <Check size={14} />
+            Save Design
+          </button>
+        )}
+      </div>
+
+      <div className="p-8">
+        {step === 1 && (
+          <div className="py-20 text-center space-y-6">
+            <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400 border-2 border-dashed border-slate-300">
+              <ImagePlus size={32} />
+            </div>
+            <div>
+              <h3 className="text-xl font-black uppercase tracking-tight italic">Upload Ticket Artwork</h3>
+              <p className="text-slate-500 text-sm font-medium mt-1 font-sans">PNG, JPG or WEBP supported. Max 2MB.</p>
+            </div>
+            <label className="btn-primary cursor-pointer inline-flex items-center gap-3 px-10">
+              <Plus size={20} />
+              Select File
+              <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
+            </label>
+          </div>
+        )}
+
+        {step === 2 && artwork && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400">
+              <span>Drag to move • Corner to resize</span>
+              <div className="flex gap-4">
+                <span>X: {Math.round(qrPos.x)}%</span>
+                <span>Y: {Math.round(qrPos.y)}%</span>
+                <span>Size: {Math.round(qrPos.width)}%</span>
+              </div>
+            </div>
+            <div 
+              ref={containerRef}
+              className="relative border-2 border-slate-900 bg-slate-50 rounded overflow-hidden select-none cursor-crosshair"
+              style={{ maxWidth: '600px', margin: '0 auto' }}
+            >
+              <img src={artwork} alt="Artwork" className="w-full h-auto block" />
+              <div 
+                onMouseDown={handleMouseDown}
+                className="absolute border-2 border-indigo-600 border-dashed bg-indigo-600/10 shadow-[0_0_15px_rgba(79,70,229,0.3)] group"
+                style={{ 
+                  left: `${qrPos.x}%`, 
+                  top: `${qrPos.y}%`, 
+                  width: `${qrPos.width}%`, 
+                  height: `${qrPos.width}%`,
+                  cursor: isDragging ? 'grabbing' : 'grab'
+                }}
+              >
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <QrCode size={24} className="text-indigo-600 opacity-50" />
+                </div>
+                <div 
+                  onMouseDown={handleResizeMouseDown}
+                  className="absolute -bottom-2 -right-2 w-5 h-5 bg-indigo-600 rounded-full border-2 border-white shadow-lg cursor-nwse-resize flex items-center justify-center hover:scale-125 transition-transform z-10"
+                >
+                  <Maximize2 size={10} className="text-white" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && artwork && (
+          <div className="py-10 text-center space-y-8">
+            <div className="inline-block relative border-2 border-slate-900 shadow-xl rounded overflow-hidden max-w-[400px]">
+              <img src={artwork} alt="Final Preview" className="w-full h-auto" />
+              <div 
+                className="absolute bg-white p-1"
+                style={{ 
+                  left: `${qrPos.x}%`, 
+                  top: `${qrPos.y}%`, 
+                  width: `${qrPos.width}%`, 
+                  height: `${qrPos.width}%`
+                }}
+              >
+                <div className="w-full h-full bg-slate-100 flex items-center justify-center">
+                  <QrCode size={40} className="text-slate-300" />
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-emerald-600/10 pointer-events-none"></div>
+            </div>
+            
+            <div className="space-y-4">
+              <h3 className="text-2xl font-black uppercase tracking-tight italic text-slate-900">Design Finalized!</h3>
+              <p className="text-slate-500 font-medium font-sans">All new tickets will now be generated with this artwork.</p>
+              <div className="flex justify-center gap-4 pt-4">
+                <button onClick={() => setStep(2)} className="btn-secondary">
+                  <Move size={18} />
+                  Adjust Position
+                </button>
+                <button onClick={() => {
+                  if(confirm('Delete artwork and reset design?')) {
+                    setArtwork(null);
+                    setStep(1);
+                    onUpdate('', null);
+                  }
+                }} className="btn-secondary text-rose-600 border-rose-200">
+                  <Trash2 size={18} />
+                  Reset Artwork
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

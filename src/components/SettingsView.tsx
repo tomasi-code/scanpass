@@ -9,7 +9,7 @@ import { AppData, AppSettings } from '../types';
 
 interface SettingsProps {
   data: AppData;
-  onUpdateData: (newData: AppData) => void;
+  onUpdateData: (newData: AppData) => Promise<void>;
 }
 
 export default function SettingsView({ data, onUpdateData }: SettingsProps) {

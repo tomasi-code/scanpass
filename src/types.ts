@@ -16,6 +16,13 @@ export interface Event {
   maxCapacity: number;
   ticketPrice?: number;
   createdAt: number;
+  artwork?: string;
+  qrPosition?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
 
 export interface Ticket {

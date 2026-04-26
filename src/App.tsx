@@ -348,7 +348,7 @@ function renderView(
   view: ViewState, 
   data: AppData, 
   navigateToEvent: (id: string) => void, 
-  updateData: (d: AppData) => void, 
+  updateData: (d: AppData) => Promise<void>, 
   selectedEventId: string | null,
   onSetView: (v: ViewState) => void
 ) {
