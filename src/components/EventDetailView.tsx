@@ -147,60 +147,73 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          if (event.artwork) {
-            // Load artwork
+          if (event.artwork && event.qrPosition) {
+            // Load artwork — onload BEFORE src to avoid race condition
             const artworkImg = new Image();
-            artworkImg.crossOrigin = "anonymous";
-            artworkImg.src = event.artwork;
-            
-            await new Promise((resolve) => {
-              artworkImg.onload = resolve;
+            artworkImg.crossOrigin = 'anonymous';
+            await new Promise<void>((resolve, reject) => {
+              artworkImg.onload = () => resolve();
+              artworkImg.onerror = () => reject();
+              artworkImg.src = event.artwork!;
             });
 
             canvas.width = artworkImg.naturalWidth;
             canvas.height = artworkImg.naturalHeight;
-
-            // Draw artwork
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(artworkImg, 0, 0);
 
-            if (event.qrPosition) {
-              const qrCanvas = bulkQrRef.current?.querySelector('canvas') as HTMLCanvasElement;
-              if (qrCanvas) {
-                const x = (event.qrPosition.x / 100) * canvas.width;
-                const y = (event.qrPosition.y / 100) * canvas.height;
-                const size = (event.qrPosition.width / 100) * canvas.width;
+            // Generate fresh high-res QR
+            const qrSize = 800;
+            const qrDiv = document.createElement('div');
+            document.body.appendChild(qrDiv);
+            await new Promise<void>((resolve) => {
+              new (window as any).QRCode(qrDiv, {
+                text: JSON.stringify({
+                  ticketId: ticket.id,
+                  eventId: ticket.eventId,
+                  eventName: ticket.eventName,
+                  attendeeName: ticket.attendeeName,
+                  ticketType: ticket.ticketType,
+                  issuedAt: ticket.issuedAt
+                }),
+                width: qrSize,
+                height: qrSize,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: (window as any).QRCode.CorrectLevel.H
+              });
+              setTimeout(resolve, 100);
+            });
 
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = qrCanvas.width;
-                tempCanvas.height = qrCanvas.height;
-                const tempCtx = tempCanvas.getContext('2d');
-                if (tempCtx) {
-                  tempCtx.drawImage(qrCanvas, 0, 0);
-                  const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-                  const pixels = imgData.data;
-                  
-                  for (let j = 0; j < pixels.length; j += 4) {
-                    const isDark = (pixels[j] + pixels[j+1] + pixels[j+2]) / 3 < 128;
-                    if (isDark) {
-                      pixels[j] = 0; pixels[j+1] = 0; pixels[j+2] = 0; pixels[j+3] = 255;
-                    } else {
-                      pixels[j+3] = 0;
-                    }
-                  }
-                  tempCtx.putImageData(imgData, 0, 0);
-                  ctx.drawImage(tempCanvas, x, y, size, size);
-                }
+            const renderedQr = qrDiv.querySelector('canvas') as HTMLCanvasElement;
+            if (renderedQr) {
+              const tempCanvas = document.createElement('canvas');
+              tempCanvas.width = renderedQr.width;
+              tempCanvas.height = renderedQr.height;
+              const tempCtx = tempCanvas.getContext('2d')!;
+              tempCtx.drawImage(renderedQr, 0, 0);
+              const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+              const pixels = imgData.data;
+              for (let j = 0; j < pixels.length; j += 4) {
+                const avg = (pixels[j] + pixels[j + 1] + pixels[j + 2]) / 3;
+                pixels[j + 3] = avg < 128 ? 255 : 0;
+                if (avg < 128) { pixels[j] = 0; pixels[j + 1] = 0; pixels[j + 2] = 0; }
               }
+              tempCtx.putImageData(imgData, 0, 0);
+              const x = (event.qrPosition.x / 100) * canvas.width;
+              const y = (event.qrPosition.y / 100) * canvas.height;
+              const size = (event.qrPosition.width / 100) * canvas.width;
+              ctx.drawImage(tempCanvas, x, y, size, size);
             }
+            document.body.removeChild(qrDiv);
           } else {
-            // Fallback to plain QR
+            // Fallback to plain QR on white background
+            canvas.width = 500;
+            canvas.height = 500;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 500, 500);
             const qrCanvas = bulkQrRef.current?.querySelector('canvas') as HTMLCanvasElement;
-            if (qrCanvas) {
-              canvas.width = qrCanvas.width;
-              canvas.height = qrCanvas.height;
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.drawImage(qrCanvas, 0, 0);
-            }
+            if (qrCanvas) ctx.drawImage(qrCanvas, 0, 0, 500, 500);
           }
 
           const link = document.createElement('a');
@@ -659,57 +672,86 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
   const handleDownload = async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Load artwork
-    const artworkImg = new Image();
-    artworkImg.crossOrigin = "anonymous";
-    artworkImg.src = event.artwork || '';
-    
-    await new Promise((resolve) => {
-      artworkImg.onload = resolve;
-    });
+    if (event.artwork && event.qrPosition) {
+      // Step 1: Load artwork — set onload BEFORE src to avoid race condition
+      const artworkImg = new Image();
+      artworkImg.crossOrigin = 'anonymous';
+      await new Promise<void>((resolve, reject) => {
+        artworkImg.onload = () => resolve();
+        artworkImg.onerror = () => reject(new Error('Artwork failed to load'));
+        artworkImg.src = event.artwork!;
+      });
 
-    canvas.width = artworkImg.naturalWidth;
-    canvas.height = artworkImg.naturalHeight;
+      canvas.width = artworkImg.naturalWidth;
+      canvas.height = artworkImg.naturalHeight;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(artworkImg, 0, 0);
 
-    // Draw artwork
-    ctx.drawImage(artworkImg, 0, 0);
+      // Step 2: Generate QR at high resolution on offscreen canvas
+      const qrSize = 800;
+      const qrCanvas = document.createElement('canvas');
+      qrCanvas.width = qrSize;
+      qrCanvas.height = qrSize;
+      const qrDiv = document.createElement('div');
+      document.body.appendChild(qrDiv);
 
-    if (event.qrPosition) {
-      // Get QR code as image from the qrRef hidden element
-      const qrCanvas = qrRef.current?.querySelector('canvas');
-      if (qrCanvas) {
+      const qrData = JSON.stringify({
+        ticketId: ticket.id,
+        eventId: ticket.eventId,
+        eventName: ticket.eventName,
+        attendeeName: ticket.attendeeName,
+        ticketType: ticket.ticketType,
+        issuedAt: ticket.issuedAt
+      });
+
+      await new Promise<void>((resolve) => {
+        new (window as any).QRCode(qrDiv, {
+          text: qrData,
+          width: qrSize,
+          height: qrSize,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: (window as any).QRCode.CorrectLevel.H
+        });
+        setTimeout(resolve, 100);
+      });
+
+      const renderedQr = qrDiv.querySelector('canvas') as HTMLCanvasElement;
+      if (renderedQr) {
+        // Make white pixels transparent
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = renderedQr.width;
+        tempCanvas.height = renderedQr.height;
+        const tempCtx = tempCanvas.getContext('2d')!;
+        tempCtx.drawImage(renderedQr, 0, 0);
+        const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const pixels = imgData.data;
+        for (let i = 0; i < pixels.length; i += 4) {
+          const avg = (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+          pixels[i + 3] = avg < 128 ? 255 : 0;
+          if (avg < 128) { pixels[i] = 0; pixels[i + 1] = 0; pixels[i + 2] = 0; }
+        }
+        tempCtx.putImageData(imgData, 0, 0);
+
+        // Step 3: Draw QR at correct position and size on ticket
         const x = (event.qrPosition.x / 100) * canvas.width;
         const y = (event.qrPosition.y / 100) * canvas.height;
         const size = (event.qrPosition.width / 100) * canvas.width;
-
-        // Process QR canvas to ensure transparency and only dark modules
-        const tempCanvas = document.createElement('canvas');
-        // Use a higher resolution for processing the QR code
-        tempCanvas.width = qrCanvas.width;
-        tempCanvas.height = qrCanvas.height;
-        const tempCtx = tempCanvas.getContext('2d');
-        if (tempCtx) {
-          tempCtx.drawImage(qrCanvas, 0, 0);
-          const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-          const pixels = imgData.data;
-          
-          for (let i = 0; i < pixels.length; i += 4) {
-            const isDark = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3 < 128;
-            if (isDark) {
-              pixels[i] = 0; pixels[i+1] = 0; pixels[i+2] = 0; pixels[i+3] = 255;
-            } else {
-              pixels[i+3] = 0;
-            }
-          }
-          tempCtx.putImageData(imgData, 0, 0);
-          
-          // Draw the processed QR code scaled to the target size
-          ctx.drawImage(tempCanvas, x, y, size, size);
-        }
+        ctx.drawImage(tempCanvas, x, y, size, size);
+      }
+      document.body.removeChild(qrDiv);
+    } else {
+      // Fallback: plain QR on white background
+      const qrCanvas = qrRef.current?.querySelector('canvas');
+      if (qrCanvas) {
+        canvas.width = 500;
+        canvas.height = 500;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 500, 500);
+        ctx.drawImage(qrCanvas, 0, 0, 500, 500);
       }
     }
 
@@ -745,21 +787,23 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
         className="ticket-card bg-white p-0 overflow-hidden w-full max-w-sm border-2 border-slate-900 shadow-2xl"
       >
         {event.artwork && event.qrPosition ? (
-          <div className="relative">
-            <img src={event.artwork} alt="Ticket Artwork" className="w-full h-auto" />
-            <div 
-              className="absolute"
-              style={{ 
-                left: `${event.qrPosition.x}%`, 
-                top: `${event.qrPosition.y}%`, 
-                width: `${event.qrPosition.width}%`, 
-                aspectRatio: '1 / 1'
-              }}
-            >
+          <div className="relative flex flex-col">
+            <div className="relative">
+              <img src={event.artwork} alt="Ticket Artwork" className="w-full h-auto block" />
               <div 
-                ref={qrRef} 
-                className="w-full h-full [&>canvas]:w-full [&>canvas]:h-full [&>img]:hidden"
-              ></div>
+                className="absolute"
+                style={{ 
+                  left: `${event.qrPosition.x}%`, 
+                  top: `${event.qrPosition.y}%`, 
+                  width: `${Math.min(event.qrPosition.width, 40)}%`, 
+                  aspectRatio: '1 / 1'
+                }}
+              >
+                <div 
+                  ref={qrRef} 
+                  className="w-full h-full [&>canvas]:w-full [&>canvas]:h-full [&>img]:hidden"
+                ></div>
+              </div>
             </div>
             <div className="p-4 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest text-center">
               Event Ticket: {ticket.attendeeName} • {ticket.id}
