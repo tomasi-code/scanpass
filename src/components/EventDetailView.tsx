@@ -518,8 +518,8 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
         text: qrData,
         width: 180,
         height: 180,
-        colorDark : "#0f172a",
-        colorLight : "#ffffff",
+        colorDark : "#000000",
+        colorLight : "rgba(0,0,0,0)",
         correctLevel : (window as any).QRCode.CorrectLevel.H
       });
     }
@@ -555,11 +555,27 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
         const y = (event.qrPosition.y / 100) * canvas.height;
         const size = (event.qrPosition.width / 100) * canvas.width;
 
-        // Draw white background for QR
-        ctx.fillStyle = 'white';
-        ctx.fillRect(x - 5, y - 5, size + 10, size + 10);
-        
-        ctx.drawImage(qrCanvas, x, y, size, size);
+        // Process QR canvas to ensure transparency and only dark modules
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = qrCanvas.width;
+        tempCanvas.height = qrCanvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        if (tempCtx) {
+          tempCtx.drawImage(qrCanvas, 0, 0);
+          const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+          const pixels = imgData.data;
+          
+          for (let i = 0; i < pixels.length; i += 4) {
+            const isDark = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3 < 128;
+            if (isDark) {
+              pixels[i] = 0; pixels[i+1] = 0; pixels[i+2] = 0; pixels[i+3] = 255;
+            } else {
+              pixels[i+3] = 0;
+            }
+          }
+          tempCtx.putImageData(imgData, 0, 0);
+          ctx.drawImage(tempCanvas, x, y, size, size);
+        }
       }
     }
 
@@ -598,7 +614,7 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
           <div className="relative">
             <img src={event.artwork} alt="Ticket Artwork" className="w-full h-auto" />
             <div 
-              className="absolute bg-white p-1"
+              className="absolute"
               style={{ 
                 left: `${event.qrPosition.x}%`, 
                 top: `${event.qrPosition.y}%`, 
