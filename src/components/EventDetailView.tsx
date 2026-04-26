@@ -135,7 +135,7 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
           width: 500,
           height: 500,
           colorDark: "#000000",
-          colorLight: "rgba(0,0,0,0)",
+          colorLight: "#ffffff",
           correctLevel: (window as any).QRCode.CorrectLevel.H
         });
         
@@ -662,9 +662,9 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
         text: qrData,
         width: 500,
         height: 500,
-        colorDark : "#000000",
-        colorLight : "rgba(0,0,0,0)",
-        correctLevel : (window as any).QRCode.CorrectLevel.H
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: (window as any).QRCode.CorrectLevel.H
       });
     }
   }, [ticket]);
@@ -787,15 +787,15 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
         className="ticket-card bg-white p-0 overflow-hidden w-full max-w-sm border-2 border-slate-900 shadow-2xl"
       >
         {event.artwork && event.qrPosition ? (
-          <div className="relative flex flex-col">
+          <div className="flex flex-col">
             <div className="relative">
               <img src={event.artwork} alt="Ticket Artwork" className="w-full h-auto block" />
               <div 
-                className="absolute"
+                className="absolute bg-white p-1"
                 style={{ 
                   left: `${event.qrPosition.x}%`, 
                   top: `${event.qrPosition.y}%`, 
-                  width: `${Math.min(event.qrPosition.width, 40)}%`, 
+                  width: `${Math.min(event.qrPosition.width, 35)}%`, 
                   aspectRatio: '1 / 1'
                 }}
               >
@@ -805,8 +805,9 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
                 ></div>
               </div>
             </div>
-            <div className="p-4 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest text-center">
-              Event Ticket: {ticket.attendeeName} • {ticket.id}
+            <div className="p-3 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest text-center leading-relaxed">
+              <div>{ticket.attendeeName}</div>
+              <div className="text-slate-400 mt-1">{ticket.id}</div>
             </div>
           </div>
         ) : (
