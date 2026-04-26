@@ -45,6 +45,11 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | TicketStatus>('all');
   const [showDesigner, setShowDesigner] = useState(false);
+  const [isBulkDownloading, setIsBulkDownloading] = useState(false);
+  const [bulkDownloadProgress, setBulkDownloadProgress] = useState({ current: 0, total: 0 });
+  
+  const bulkQrRef = useRef<HTMLDivElement>(null);
+  const bulkCanvasRef = useRef<HTMLCanvasElement>(null);
 
   if (!event) return <div>Event not found</div>;
 
@@ -105,8 +110,121 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
     }
   };
 
+  const handleDownloadAll = async () => {
+    if (tickets.length === 0) return;
+    setIsBulkDownloading(true);
+    setBulkDownloadProgress({ current: 0, total: tickets.length });
+
+    for (let i = 0; i < tickets.length; i++) {
+      const ticket = tickets[i];
+      setBulkDownloadProgress({ current: i + 1, total: tickets.length });
+
+      // Generate QR Code in hidden div
+      if (bulkQrRef.current) {
+        bulkQrRef.current.innerHTML = '';
+        const qrData = JSON.stringify({
+          ticketId: ticket.id,
+          eventId: ticket.eventId,
+          eventName: ticket.eventName,
+          attendeeName: ticket.attendeeName,
+          ticketType: ticket.ticketType,
+          issuedAt: ticket.issuedAt
+        });
+        new (window as any).QRCode(bulkQrRef.current, {
+          text: qrData,
+          width: 500,
+          height: 500,
+          colorDark: "#000000",
+          colorLight: "rgba(0,0,0,0)",
+          correctLevel: (window as any).QRCode.CorrectLevel.H
+        });
+        
+        // Wait a small bit for QR to render if needed, though QRCode is usually sync
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+
+      const canvas = bulkCanvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          if (event.artwork) {
+            // Load artwork
+            const artworkImg = new Image();
+            artworkImg.crossOrigin = "anonymous";
+            artworkImg.src = event.artwork;
+            
+            await new Promise((resolve) => {
+              artworkImg.onload = resolve;
+            });
+
+            canvas.width = artworkImg.naturalWidth;
+            canvas.height = artworkImg.naturalHeight;
+
+            // Draw artwork
+            ctx.drawImage(artworkImg, 0, 0);
+
+            if (event.qrPosition) {
+              const qrCanvas = bulkQrRef.current?.querySelector('canvas') as HTMLCanvasElement;
+              if (qrCanvas) {
+                const x = (event.qrPosition.x / 100) * canvas.width;
+                const y = (event.qrPosition.y / 100) * canvas.height;
+                const size = (event.qrPosition.width / 100) * canvas.width;
+
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = qrCanvas.width;
+                tempCanvas.height = qrCanvas.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                if (tempCtx) {
+                  tempCtx.drawImage(qrCanvas, 0, 0);
+                  const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                  const pixels = imgData.data;
+                  
+                  for (let j = 0; j < pixels.length; j += 4) {
+                    const isDark = (pixels[j] + pixels[j+1] + pixels[j+2]) / 3 < 128;
+                    if (isDark) {
+                      pixels[j] = 0; pixels[j+1] = 0; pixels[j+2] = 0; pixels[j+3] = 255;
+                    } else {
+                      pixels[j+3] = 0;
+                    }
+                  }
+                  tempCtx.putImageData(imgData, 0, 0);
+                  ctx.drawImage(tempCanvas, x, y, size, size);
+                }
+              }
+            }
+          } else {
+            // Fallback to plain QR
+            const qrCanvas = bulkQrRef.current?.querySelector('canvas') as HTMLCanvasElement;
+            if (qrCanvas) {
+              canvas.width = qrCanvas.width;
+              canvas.height = qrCanvas.height;
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(qrCanvas, 0, 0);
+            }
+          }
+
+          const link = document.createElement('a');
+          link.download = `${ticket.attendeeName.replace(/\s+/g, '_')}_Ticket.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        }
+      }
+      
+      // Small pause to prevent browser from being overwhelmed
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    setIsBulkDownloading(false);
+  };
+
   return (
     <div className="space-y-8">
+      {/* Hidden elements for bulk download */}
+      <div className="hidden">
+        <div ref={bulkQrRef}></div>
+        <canvas ref={bulkCanvasRef}></canvas>
+      </div>
+
       {/* Event Stats Summary */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="card p-6 bg-indigo-600 text-white">
@@ -170,6 +288,19 @@ export default function EventDetailView({ eventId, data, onUpdateData }: EventDe
             Attendees
           </h2>
           <div className="flex items-center gap-3">
+             {isBulkDownloading && (
+               <div className="text-[10px] font-black uppercase tracking-widest text-indigo-600 animate-pulse">
+                 Downloading {bulkDownloadProgress.current} of {bulkDownloadProgress.total}...
+               </div>
+             )}
+             <button 
+               onClick={handleDownloadAll} 
+               className="btn-secondary"
+               disabled={isBulkDownloading || tickets.length === 0}
+             >
+               <Download size={18} />
+               {isBulkDownloading ? 'Downloading...' : 'Download All'}
+             </button>
              <button onClick={exportCSV} className="btn-secondary">
                <FileSpreadsheet size={18} />
                CSV
