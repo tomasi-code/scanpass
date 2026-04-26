@@ -516,8 +516,8 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
       });
       new (window as any).QRCode(qrRef.current, {
         text: qrData,
-        width: 180,
-        height: 180,
+        width: 500,
+        height: 500,
         colorDark : "#000000",
         colorLight : "rgba(0,0,0,0)",
         correctLevel : (window as any).QRCode.CorrectLevel.H
@@ -541,8 +541,8 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
       artworkImg.onload = resolve;
     });
 
-    canvas.width = artworkImg.width;
-    canvas.height = artworkImg.height;
+    canvas.width = artworkImg.naturalWidth;
+    canvas.height = artworkImg.naturalHeight;
 
     // Draw artwork
     ctx.drawImage(artworkImg, 0, 0);
@@ -557,6 +557,7 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
 
         // Process QR canvas to ensure transparency and only dark modules
         const tempCanvas = document.createElement('canvas');
+        // Use a higher resolution for processing the QR code
         tempCanvas.width = qrCanvas.width;
         tempCanvas.height = qrCanvas.height;
         const tempCtx = tempCanvas.getContext('2d');
@@ -574,6 +575,8 @@ function TicketCardModal({ ticket, event, onClose }: { ticket: Ticket, event: Ev
             }
           }
           tempCtx.putImageData(imgData, 0, 0);
+          
+          // Draw the processed QR code scaled to the target size
           ctx.drawImage(tempCanvas, x, y, size, size);
         }
       }
