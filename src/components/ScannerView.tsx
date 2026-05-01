@@ -7,6 +7,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Camera, RefreshCw, CheckCircle2, XCircle, AlertCircle, Tag } from 'lucide-react';
 import { AppData, Ticket, ScanLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../lib/supabase';
 
 interface ScannerViewProps {
   data: AppData;
@@ -155,10 +156,25 @@ export default function ScannerView({ data, onUpdateData }: ScannerViewProps) {
     validateTicket(ticketId);
   };
 
-  const validateTicket = (ticketId: string) => {
-    const ticket = data.tickets.find(t => t.id === ticketId);
-    if (!ticket) { processResult('invalid', undefined, 'Ticket ID not found in database.'); return; }
-    if (ticket.status === 'Revoked') { processResult('invalid', ticket, 'This ticket has been revoked.'); return; }
+  const validateTicket = async (ticketId: string) => {
+    // Always fetch fresh from Supabase so newly generated tickets are always found
+    const { data: freshTickets, error } = await supabase
+      .from('tickets')
+      .select('*')
+      .eq('id', ticketId)
+      .limit(1);
+
+    if (error || !freshTickets || freshTickets.length === 0) {
+      processResult('invalid', undefined, 'Ticket ID not found in database.');
+      return;
+    }
+
+    const ticket = freshTickets[0] as Ticket;
+
+    if (ticket.status === 'Revoked') {
+      processResult('invalid', ticket, 'This ticket has been revoked.');
+      return;
+    }
     if (ticket.status === 'Scanned' && !data.settings.allowMultipleScans) {
       processResult('duplicate', ticket, `Already scanned at ${new Date(ticket.lastScannedAt!).toLocaleTimeString()}`);
       return;
